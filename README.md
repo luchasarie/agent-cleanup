@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="assets/hero.jpg" alt="agent-cleanup: reclaim the disk space AI coding agents like Claude Code, Codex and Cursor leave behind" width="100%">
+  <img src="assets/hero.jpg" alt="agent-cleanup: reclaim the disk space AI coding agents leave behind" width="100%">
 </p>
 
 <h1 align="center">agent-cleanup</h1>
 
 <p align="center">
-  <b>Clean up git worktrees, merged branches, <code>node_modules</code>, package caches and agent logs left behind by AI coding agents.</b><br>
-  A <code>/cleanup</code> skill for Claude Code, Codex, Cursor, Gemini CLI, OpenCode and GitHub Copilot, plus a standalone Python CLI.
+  <b>Clean up stale git worktrees, merged branches, <code>node_modules</code>, package caches and agent session logs.</b><br>
+  Works as a <code>/cleanup</code> skill in Claude Code, Codex, Cursor, Gemini CLI, OpenCode and GitHub Copilot, or as a standalone Python CLI.
 </p>
 
 <p align="center">
@@ -153,7 +153,7 @@ Use `--dry-run` to see the exact commands first.
 
 ### How do I delete git worktrees after their branch is merged?
 
-Run `/cleanup` in your agent, or `python3 agent_cleanup.py scan --only git` by hand. A worktree counts as merged when its PR was merged on GitHub or when merging its branch would change nothing on the base branch, so squash and rebase merges are caught too. `apply` then runs `git worktree remove` for the ids you pick and keeps any branch that still has unmerged work.
+Run `/cleanup` in your agent, or `python3 $S scan --only git` by hand (see [Without an agent](#without-an-agent) for `$S`). A worktree counts as merged when its PR was merged on GitHub or when merging its branch would change nothing on the base branch, so squash and rebase merges are caught too. `apply` then runs `git worktree remove` for the ids you pick and keeps any branch that still has unmerged work.
 
 ### How do I free up disk space used by Claude Code?
 
@@ -161,7 +161,7 @@ Claude Code keeps task worktrees in `<repo>/.claude/worktrees/` and logs in `~/.
 
 ### Where do Codex, Cursor and other agents keep their worktrees?
 
-See [Agent folders it knows](#agent-folders-it-knows). Codex uses `$CODEX_HOME/worktrees` and keeps sessions under `$CODEX_HOME/sessions` with no built-in retention, so they grow until something deletes them. Worktrees anywhere else are still found through their repository.
+See [Agent folders it knows](#agent-folders-it-knows). Codex uses `$CODEX_HOME/worktrees` and keeps sessions under `$CODEX_HOME/sessions` with no built-in retention, so they grow until something deletes them. Cursor appears to use `~/.cursor/worktrees`, though its docs don't say so; the folder is skipped if it doesn't exist. Worktrees anywhere else are still found through their repository.
 
 ### Will it delete `node_modules` in a project I'm working on?
 
@@ -169,7 +169,7 @@ No. Build artifacts are only offered in projects where no file was touched for `
 
 ### Is it safe to run?
 
-`scan` only reads. `apply` acts on the ids you pick, re-checks each one first, and skips anything that changed since the scan. Worktrees are removed by git without `--force`, unmerged commits are kept, and every action is logged. See [Safety](#safety).
+`scan` doesn't change your files; with `--fetch` it updates remote-tracking refs. `apply` acts on the ids you pick, re-checks each one first, and skips anything that changed since the scan. Worktrees are removed by git without `--force`, unmerged commits are kept, and every action is logged. See [Safety](#safety).
 
 ### Can I use it without an AI agent?
 

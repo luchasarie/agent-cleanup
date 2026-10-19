@@ -1,9 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="831" height="580" viewBox="0 0 831 580" role="img" aria-labelledby="t d">
+<svg xmlns="http://www.w3.org/2000/svg" width="831" height="622" viewBox="0 0 831 622" role="img" aria-labelledby="t d">
 <title id="t">agent-cleanup scan output</title>
 <desc id="d">Terminal showing /cleanup sorting merged worktrees, caches and build artifacts into REMOVE and unique work into NEEDS-DECISION, with 21.4 GB reclaimable.</desc>
 <style>text{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;font-size:14px;white-space:pre}</style>
-<rect width="831" height="580" rx="12" fill="#0d1117"/>
-<rect x="0.5" y="0.5" width="830" height="579" rx="12" fill="none" stroke="#30363d"/>
+<rect width="831" height="622" rx="12" fill="#0d1117"/>
+<rect x="0.5" y="0.5" width="830" height="621" rx="12" fill="none" stroke="#30363d"/>
 <path d="M0.5 36V12.5a12 12 0 0 1 12-12h806a12 12 0 0 1 12 12V36z" fill="#161b22"/>
 <line x1="0" y1="36" x2="831" y2="36" stroke="#30363d"/>
 <circle cx="22" cy="18" r="6" fill="#ff5f57"/>
@@ -11,7 +11,7 @@
 <circle cx="62" cy="18" r="6" fill="#28c840"/>
 <text x="415.5" y="23" text-anchor="middle" fill="#7d8590" style="font-size:12px">agent-cleanup — scan</text>
 <text x="24" y="60" xml:space="preserve"><tspan fill="#58a6ff">~/code/api ❯ </tspan><tspan fill="#e6edf3">/cleanup</tspan></text>
-<text x="24" y="81" xml:space="preserve"><tspan fill="#7d8590">python3 agent_cleanup.py scan --fetch --root ~/code</tspan></text>
+<text x="24" y="81" xml:space="preserve"><tspan fill="#7d8590">python3 scripts/agent_cleanup.py scan --fetch --root ~/code</tspan></text>
 <text x="24" y="123" xml:space="preserve"><tspan fill="#3fb950" font-weight="bold">REMOVE</tspan><tspan fill="#c9d1d9">: safe to reclaim (merged, regenerable, or already gone)  </tspan><tspan fill="#7d8590">[9 item(s), 21.4 GB]</tspan></text>
 <text x="24" y="144" xml:space="preserve"><tspan fill="#7d8590">    1  </tspan><tspan fill="#e6edf3"> 11.2 GB</tspan><tspan fill="#c9d1d9">  </tspan><tspan fill="#bc8cff">cache         </tspan><tspan fill="#c9d1d9">  </tspan><tspan fill="#79c0ff">~/.cache/uv</tspan></text>
 <text x="24" y="165" xml:space="preserve"><tspan fill="#7d8590">                                 uv cache; `uv cache prune`</tspan></text>
@@ -23,12 +23,14 @@
 <text x="24" y="291" xml:space="preserve"><tspan fill="#7d8590">                                 node_modules, .next in a project untouched since 2026-06-30</tspan></text>
 <text x="24" y="312" xml:space="preserve"><tspan fill="#7d8590">    5  </tspan><tspan fill="#e6edf3">       -</tspan><tspan fill="#c9d1d9">  </tspan><tspan fill="#bc8cff">worktree      </tspan><tspan fill="#c9d1d9">  </tspan><tspan fill="#79c0ff">/tmp/release-bc6d6cd</tspan></text>
 <text x="24" y="333" xml:space="preserve"><tspan fill="#7d8590">                                 directory is gone; unregister it</tspan></text>
-<text x="24" y="375" xml:space="preserve"><tspan fill="#d29922" font-weight="bold">NEEDS-DECISION</tspan><tspan fill="#c9d1d9">: holds something unique  </tspan><tspan fill="#7d8590">[4 item(s), 6.2 GB]</tspan></text>
-<text x="24" y="396" xml:space="preserve"><tspan fill="#7d8590">   10  </tspan><tspan fill="#e6edf3">  4.8 GB</tspan><tspan fill="#c9d1d9">  </tspan><tspan fill="#bc8cff">worktree      </tspan><tspan fill="#c9d1d9">  </tspan><tspan fill="#79c0ff">~/code/demo-backend</tspan></text>
-<text x="24" y="417" xml:space="preserve"><tspan fill="#7d8590">                                 add-demo · 5 uncommitted path(s), no PR</tspan></text>
-<text x="24" y="438" xml:space="preserve"><tspan fill="#7d8590">   11  </tspan><tspan fill="#e6edf3">319.6 MB</tspan><tspan fill="#c9d1d9">  </tspan><tspan fill="#bc8cff">agent-data    </tspan><tspan fill="#c9d1d9">  </tspan><tspan fill="#79c0ff">~/.codex/sessions</tspan></text>
-<text x="24" y="459" xml:space="preserve"><tspan fill="#7d8590">                                 Codex session rollouts older than 30d</tspan></text>
-<text x="24" y="480" xml:space="preserve"><tspan fill="#7d8590">   12  </tspan><tspan fill="#e6edf3">       -</tspan><tspan fill="#c9d1d9">  </tspan><tspan fill="#bc8cff">branch        </tspan><tspan fill="#c9d1d9">  </tspan><tspan fill="#79c0ff">~/code/api</tspan></text>
-<text x="24" y="501" xml:space="preserve"><tspan fill="#7d8590">                                 feat/provider · stale 75d, no PR, 2 unpushed commit(s)</tspan></text>
-<text x="24" y="543" xml:space="preserve"><tspan fill="#c9d1d9">Reclaimable: </tspan><tspan fill="#3fb950" font-weight="bold">21.4 GB</tspan><tspan fill="#c9d1d9"> recommended, up to </tspan><tspan fill="#d29922" font-weight="bold">27.6 GB</tspan><tspan fill="#c9d1d9"> with NEEDS-DECISION.</tspan></text>
+<text x="24" y="354" xml:space="preserve"><tspan fill="#7d8590">  ...</tspan></text>
+<text x="24" y="396" xml:space="preserve"><tspan fill="#d29922" font-weight="bold">NEEDS-DECISION</tspan><tspan fill="#c9d1d9">: holds something unique  </tspan><tspan fill="#7d8590">[4 item(s), 6.2 GB]</tspan></text>
+<text x="24" y="417" xml:space="preserve"><tspan fill="#7d8590">   10  </tspan><tspan fill="#e6edf3">  4.8 GB</tspan><tspan fill="#c9d1d9">  </tspan><tspan fill="#bc8cff">worktree      </tspan><tspan fill="#c9d1d9">  </tspan><tspan fill="#79c0ff">~/code/demo-backend</tspan></text>
+<text x="24" y="438" xml:space="preserve"><tspan fill="#7d8590">                                 add-demo · 5 uncommitted path(s), no PR</tspan></text>
+<text x="24" y="459" xml:space="preserve"><tspan fill="#7d8590">   11  </tspan><tspan fill="#e6edf3">319.6 MB</tspan><tspan fill="#c9d1d9">  </tspan><tspan fill="#bc8cff">agent-data    </tspan><tspan fill="#c9d1d9">  </tspan><tspan fill="#79c0ff">~/.codex/sessions</tspan></text>
+<text x="24" y="480" xml:space="preserve"><tspan fill="#7d8590">                                 Codex session rollouts older than 30d</tspan></text>
+<text x="24" y="501" xml:space="preserve"><tspan fill="#7d8590">   12  </tspan><tspan fill="#e6edf3">       -</tspan><tspan fill="#c9d1d9">  </tspan><tspan fill="#bc8cff">branch        </tspan><tspan fill="#c9d1d9">  </tspan><tspan fill="#79c0ff">~/code/api</tspan></text>
+<text x="24" y="522" xml:space="preserve"><tspan fill="#7d8590">                                 feat/provider · stale 75d, no PR, 2 unpushed commit(s)</tspan></text>
+<text x="24" y="543" xml:space="preserve"><tspan fill="#7d8590">  ...</tspan></text>
+<text x="24" y="585" xml:space="preserve"><tspan fill="#c9d1d9">Reclaimable: </tspan><tspan fill="#3fb950" font-weight="bold">21.4 GB</tspan><tspan fill="#c9d1d9"> recommended, up to </tspan><tspan fill="#d29922" font-weight="bold">27.6 GB</tspan><tspan fill="#c9d1d9"> with NEEDS-DECISION.</tspan></text>
 </svg>
