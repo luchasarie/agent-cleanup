@@ -1,36 +1,46 @@
-# agent-cleanup
+<p align="center">
+  <img src="assets/hero.jpg" alt="agent-cleanup: reclaim the disk space AI coding agents leave behind" width="100%">
+</p>
 
-A `/cleanup` skill that gets back the disk space AI coding agents leave behind.
+<h1 align="center">agent-cleanup</h1>
+
+<p align="center">
+  <b>Clean up stale git worktrees, merged branches, <code>node_modules</code>, package caches and agent session logs.</b><br>
+  Works as a <code>/cleanup</code> skill in Claude Code, Codex, Cursor, Gemini CLI, OpenCode and GitHub Copilot, or as a standalone Python CLI.
+</p>
+
+<p align="center">
+  <a href="https://github.com/luchasarie/agent-cleanup/actions/workflows/test.yml"><img src="https://github.com/luchasarie/agent-cleanup/actions/workflows/test.yml/badge.svg" alt="Tests"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/python-3.9%2B-3776AB.svg?logo=python&logoColor=white" alt="Python 3.9+">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20WSL-555.svg" alt="macOS, Linux and WSL">
+  <a href="https://agentskills.io"><img src="https://img.shields.io/badge/Agent%20Skills-compatible-2ea44f.svg" alt="Agent Skills compatible"></a>
+</p>
+
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#use">Use</a> ·
+  <a href="#what-it-finds">What it finds</a> ·
+  <a href="#safety">Safety</a> ·
+  <a href="#faq">FAQ</a>
+</p>
+
+---
 
 Agents like Claude Code, Codex, Cursor and Conductor run each task in its own git worktree. Each worktree is a full checkout, and many get their own `node_modules` or `.venv`. Tasks get merged and the worktrees stay. Add branches nobody deletes, `backup-before-refactor.tar.gz` files, package caches and months of session logs, and a laptop can lose tens of gigabytes without anyone noticing.
 
 `agent-cleanup` finds all of it and sorts what is safe to delete from what still holds unique work. Nothing is deleted until you pick it. It works with any agent that supports [Agent Skills](https://agentskills.io), and you can also run it by hand.
 
-```
-REMOVE: safe to reclaim (merged, regenerable, or already gone)  [9 item(s), 21.4 GB]
-    1    11.2 GB  cache           ~/.cache/uv
-                                  uv cache; `uv cache prune` (prunes only unused entries)
-    2     3.5 GB  worktree        ~/code/api-wt/cost-root
-                                  perf/hot-paths · PR #104 merged
-    3     1.9 GB  worktree        ~/.codex/worktrees/4f1c/web
-                                  feat/editorial · content already on origin/main
-    4     1.0 GB  artifacts       ~/code/old-landing
-                                  node_modules, .next in a project untouched since 2026-06-30; the next install or build recreates them
-    5          -  worktree        /tmp/release-bc6d6cd
-                                  directory is gone; unregister it
-  ...
+<p align="center">
+  <img src="assets/demo.svg" alt="agent-cleanup scan output: merged worktrees, uv cache and stale node_modules marked REMOVE, a dirty worktree and Codex session logs marked NEEDS-DECISION, 21.4 GB reclaimable" width="820">
+</p>
 
-NEEDS-DECISION: holds something unique; delete only on an explicit pick  [4 item(s), 6.2 GB]
-   10     4.8 GB  worktree        ~/code/demo-backend
-                                  add-demo · 5 uncommitted path(s), no PR
-   11   319.6 MB  agent-data      ~/.codex/sessions
-                                  Codex session rollouts older than 30d; retention: none built in
-   12          -  branch          ~/code/api
-                                  feat/provider · stale 75d, no PR, 2 unpushed commit(s)
-  ...
-
-Reclaimable: 21.4 GB recommended (REMOVE), up to 27.6 GB with NEEDS-DECISION.
-```
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/flow-dark.svg">
+    <img src="assets/flow-light.svg" alt="How it works: scan, classify into REMOVE, NEEDS-DECISION, KEEP-ACTIVE or SKIP, confirm once, then apply after re-checking each item" width="820">
+  </picture>
+</p>
 
 ## Install
 
@@ -138,6 +148,36 @@ Worktrees in any other folder are found through their repository. A scan with `-
 - **Logged.** Every action is appended to `~/.local/state/agent-cleanup/history.jsonl`.
 
 Use `--dry-run` to see the exact commands first.
+
+## FAQ
+
+### How do I delete git worktrees after their branch is merged?
+
+Run `/cleanup` in your agent, or run the script by hand with `python3 ~/.claude/skills/cleanup/scripts/agent_cleanup.py scan --only git` (adjust the path to wherever you installed the skill; see [Without an agent](#without-an-agent)). A worktree counts as merged when its PR was merged on GitHub or when merging its branch would change nothing on the base branch, so squash and rebase merges are caught too. `apply` then runs `git worktree remove` for the ids you pick and keeps any branch that still has unmerged work.
+
+### How do I free up disk space used by Claude Code?
+
+Claude Code keeps task worktrees in `<repo>/.claude/worktrees/` and logs in `~/.claude/projects`, `file-history`, `debug`, `shell-snapshots` and `paste-cache`. `agent-cleanup` offers merged worktrees for removal and logs older than `--keep-days` (30 by default) for a decision. Your `memory/` files are never touched. To stop logs piling up again, lower `cleanupPeriodDays` in Claude Code's settings.
+
+### Where do Codex, Cursor and other agents keep their worktrees?
+
+See [Agent folders it knows](#agent-folders-it-knows). Codex uses `$CODEX_HOME/worktrees` and keeps sessions under `$CODEX_HOME/sessions` with no built-in retention, so they grow until something deletes them. Cursor appears to use `~/.cursor/worktrees`, though its docs don't say so; the folder is skipped if it doesn't exist. Worktrees anywhere else are still found through their repository.
+
+### Will it delete `node_modules` in a project I'm working on?
+
+No. Build artifacts are only offered in projects where no file was touched for `--stale-days` (14 by default) and no process is running inside. In a git repo, only folders git ignores and tracks nothing in qualify. They come back with the next install or build.
+
+### Is it safe to run?
+
+`scan` doesn't change your files; with `--fetch` it updates remote-tracking refs. `apply` acts on the ids you pick, re-checks each one first, and skips anything that changed since the scan. Worktrees are removed by git without `--force`, unmerged commits are kept, and every action is logged. See [Safety](#safety).
+
+### Can I use it without an AI agent?
+
+Yes. `skills/cleanup/scripts/agent_cleanup.py` is a standalone Python script with no dependencies beyond the standard library and git. See [Without an agent](#without-an-agent).
+
+### Does it delete branches on GitHub?
+
+Only when you pass `--remote` to both `scan` and `apply`, and only branches whose local copy and remote tip are both merged. The push uses a lease, so it fails if anyone pushed to the branch after the scan.
 
 ## Development
 
