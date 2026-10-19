@@ -153,7 +153,7 @@ Use `--dry-run` to see the exact commands first.
 
 ### How do I delete git worktrees after their branch is merged?
 
-Run `/cleanup` in your agent, or `python3 $S scan --only git` by hand (see [Without an agent](#without-an-agent) for `$S`). A worktree counts as merged when its PR was merged on GitHub or when merging its branch would change nothing on the base branch, so squash and rebase merges are caught too. `apply` then runs `git worktree remove` for the ids you pick and keeps any branch that still has unmerged work.
+Run `/cleanup` in your agent, or run the script by hand with `python3 ~/.claude/skills/cleanup/scripts/agent_cleanup.py scan --only git` (adjust the path to wherever you installed the skill; see [Without an agent](#without-an-agent)). A worktree counts as merged when its PR was merged on GitHub or when merging its branch would change nothing on the base branch, so squash and rebase merges are caught too. `apply` then runs `git worktree remove` for the ids you pick and keeps any branch that still has unmerged work.
 
 ### How do I free up disk space used by Claude Code?
 

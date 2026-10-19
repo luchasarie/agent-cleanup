@@ -6,8 +6,8 @@
 <circle cx="32" cy="34" r="13" fill="#12301c"/>
 <text x="32" y="39" text-anchor="middle" font-size="14" font-weight="700" fill="#3fb950">1</text>
 <text x="54" y="40" font-size="17" font-weight="600" fill="#e6edf3">Scan</text>
-<text x="20" y="72" font-size="12.5" fill="#9198a1">read-only sweep of repos,</text>
-<text x="20" y="90" font-size="12.5" fill="#9198a1">worktrees, caches, logs</text>
+<text x="20" y="72" font-size="12.5" fill="#9198a1">sweeps repos, worktrees,</text>
+<text x="20" y="90" font-size="12.5" fill="#9198a1">caches, logs; deletes nothing</text>
 <line x1="206" y1="56.0" x2="230" y2="56.0" stroke="#6e7681" stroke-width="1.6" marker-end="url(#a)"/>
 <rect x="236" y="4" width="196" height="104" rx="10" fill="#161b22" stroke="#30363d"/>
 <circle cx="264" cy="34" r="13" fill="#12301c"/>
