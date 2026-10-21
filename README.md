@@ -31,6 +31,12 @@ Agents like Claude Code, Codex, Cursor and Conductor run each task in its own gi
 
 `agent-cleanup` finds all of it and sorts what is safe to delete from what still holds unique work. Nothing is deleted until you pick it. It works with any agent that supports [Agent Skills](https://agentskills.io), and you can also run it by hand.
 
+See it in 30 seconds:
+
+https://github.com/user-attachments/assets/f11a6031-7f93-4d33-b6ee-5b8987aa81a4
+
+[Download the MP4](assets/reel.mp4)
+
 <p align="center">
   <img src="assets/demo.svg" alt="agent-cleanup scan output: merged worktrees, uv cache and stale node_modules marked REMOVE, a dirty worktree and Codex session logs marked NEEDS-DECISION, 21.4 GB reclaimable" width="820">
 </p>
