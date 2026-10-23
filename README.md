@@ -95,7 +95,7 @@ python3 $S apply --remote 14             # remote branches need --remote here to
 | `--only` | all | Any of `git,artifacts,archives,caches,agents,trash` |
 | `--stale-days` | 14 | Untouched this long counts as stale |
 | `--keep-days` | 30 | Agent logs newer than this are kept |
-| `--recent-hours` | 24 | Merged worktrees with any file edited this recently are KEEP-ACTIVE, since an agent may still be working in them |
+| `--recent-hours` | 24 | Merged worktrees with any file outside disposable folders like `node_modules` edited this recently are KEEP-ACTIVE, since an agent may still be working in them |
 | `--min-size` | 20M | Hide storage items smaller than this |
 | `--fetch` | off | `git fetch --prune` each repo first, so merge checks see the latest base branch |
 | `--remote` | off | Also offer deleting merged branches on `origin` |
@@ -144,7 +144,7 @@ Worktrees in any other folder are found through their repository. A scan with `-
 - **Deletion takes a pick.** `apply --recommended` takes REMOVE items only. NEEDS-DECISION items need their id. KEEP-ACTIVE and SKIP items are refused even by id. Remote branches need `--remote` on both scan and apply.
 - **Re-checked before acting.** `apply` re-runs the classification. A worktree with a new commit or file, an archive or backup with any change inside, a trash with new items: each is skipped. Plans older than 24 hours are refused.
 - **git does the removal.** `git worktree remove` without `--force`, so git itself refuses a worktree that has changes. `--force` exists for when you've decided to throw those changes away.
-- **Nothing unmerged is orphaned.** A branch with unmerged work is kept when its worktree goes. A detached worktree's commits are saved under `refs/agent-cleanup/` first. A remote branch is deleted with a lease, so the push fails if anyone pushed to it after the scan.
+- **Nothing unmerged is orphaned.** A branch with unmerged work is kept when its worktree goes. A detached worktree's commits, and a deleted branch's commits that no remote has, are saved under `refs/agent-cleanup/` first. A remote branch is deleted with a lease, so the push fails if anyone pushed to it after the scan.
 - **Unknown means hands off.** If running processes can't be listed, every worktree counts as in use. If `git status` fails, the worktree needs a decision.
 - **Logged.** Every action is appended to `~/.local/state/agent-cleanup/history.jsonl`.
 

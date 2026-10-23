@@ -108,6 +108,8 @@ BACKUP_DIR_RE = re.compile(r"(^|[-_.])(bak|backup|backups|old|orig)([-_.]|$)", r
 # Never walked into while looking for repos, archives and backups.
 WALK_SKIP = ARTIFACT_DIRS | {".git", "Library", "Applications", "snap", ".Trash"}
 REMOVABLE_MEDIA = ("/media/", "/run/media/", "/mnt/", "/Volumes/")
+# Most entries a tree walk counts before giving up (AGENT_CLEANUP_TREE_LIMIT overrides).
+TREE_LIMIT = int(os.environ.get("AGENT_CLEANUP_TREE_LIMIT") or 200_000)
 
 # (name, command that prints the cache dir, fallback dir, prune command, note)
 CACHES = [
@@ -199,7 +201,7 @@ def day(ts: float) -> str:
     return dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
 
 
-def tree_stamp(path: Path, skip=frozenset(), limit=200_000):
+def tree_stamp(path: Path, skip=frozenset(), limit=TREE_LIMIT):
     """(newest mtime, entry count, complete) over a whole tree, not entering .git or `skip` names."""
     try:
         newest = path.lstat().st_mtime
@@ -361,7 +363,8 @@ def disposable(rel: str) -> bool:
     rel = rel.rstrip("/")
     parts = rel.split("/")
     return (any(p in DISPOSABLE_NAMES for p in parts) or rel.endswith(DISPOSABLE_SUFFIXES)
-            or any(rel == d or rel.endswith("/" + d) for d in DISPOSABLE_PATHS))
+            or any(rel == d or rel.endswith("/" + d) or rel.startswith(d + "/") or f"/{d}/" in rel
+                   for d in DISPOSABLE_PATHS))
 
 
 class RepoScan:
@@ -450,8 +453,6 @@ class RepoScan:
                 cls, note = self.no_own_commits(br, head, age)
             elif merged:
                 cls, note = "REMOVE", f"content already on {self.base_ref}"
-                if unpushed not in ("0", "?"):
-                    note += f"; {unpushed} local-only commit(s) saved under refs/agent-cleanup/ on delete"
             elif state == "MERGED":
                 cls, note = "NEEDS-DECISION", f"commits after PR #{num} merged, {unpushed} unpushed"
             elif age <= stale:
@@ -461,9 +462,13 @@ class RepoScan:
             else:
                 cls, note = "NEEDS-DECISION", f"stale {age}d, no PR, {unpushed} unpushed commit(s)"
         if cls == "REMOVE" and path:  # merged, but an agent or a person may still be working in it
-            newest = tree_stamp(Path(path), skip=DISPOSABLE_NAMES)[0]
-            if NOW - newest < self.opts.recent_hours * 3600:
+            newest, _, complete = tree_stamp(Path(path), skip=DISPOSABLE_NAMES)
+            if NOW - newest < getattr(self.opts, "recent_hours", 24) * 3600:  # older plans lack it
                 cls, note = "KEEP-ACTIVE", f"{note}, but files touched {(NOW - newest) / 3600:.0f}h ago"
+            elif not complete:
+                cls, note = "NEEDS-DECISION", f"{note}, but too many files to confirm nothing changed recently"
+        if cls == "REMOVE" and br and unpushed not in ("0", "?"):
+            note += f"; {unpushed} local-only commit(s) saved under refs/agent-cleanup/ on delete"
         return item(kind, cls, path, note, repo=str(self.repo), branch=br or "", head=head,
                     fingerprint=f"{head}:{dirty}:{len(kept)}", last_commit=day(last) if last else "")
 
@@ -983,13 +988,18 @@ def recheck(planned, opts):
 
 
 def rescue_branch(repo, br):
-    """Save a branch tip that no remote has under refs/agent-cleanup/ before deleting it."""
-    if (git(repo, "rev-list", "--count", br, "--not", "--remotes") or "0") == "0":
+    """Save a branch tip that no remote has under refs/agent-cleanup/ before deleting it.
+
+    An unknown count counts as unpushed; raises when the tip can't be saved.
+    """
+    if git(repo, "rev-list", "--count", f"refs/heads/{br}", "--not", "--remotes") == "0":
         return ""
-    sha = git(repo, "rev-parse", br)
+    sha = git(repo, "rev-parse", "-q", "--verify", f"refs/heads/{br}")
+    if not sha:
+        raise RuntimeError(f"could not resolve branch {br} to save it; nothing deleted")
     ref = f"refs/agent-cleanup/branches/{br}-{sha[:10]}"
     if not git_ok(repo, "update-ref", ref, sha):
-        raise RuntimeError(f"could not save {br} as {ref}; branch kept")
+        raise RuntimeError(f"could not save {br} as {ref}; nothing deleted")
     return f"; local-only commits saved as {ref}"
 
 
@@ -1007,6 +1017,8 @@ def execute(i, opts):
             if not git_ok(repo, "update-ref", ref, head):
                 raise RuntimeError(f"could not save detached HEAD as {ref}; nothing removed")
             rescue = f"; detached HEAD saved as {ref}"
+        if br and i["class"] == "REMOVE":  # its branch goes too: save it while nothing is removed yet
+            rescue += rescue_branch(repo, br)
         args = ["git", "-C", repo, "worktree", "remove"]
         if opts.force and i["class"] == "NEEDS-DECISION":
             args.append("--force")
@@ -1017,17 +1029,16 @@ def execute(i, opts):
             kept = f"; branch {i['registered_branch']} kept" if i.get("registered_branch") else ""
             return "unregistered" + kept + rescue
         if br and i["class"] == "REMOVE":
-            rescue += rescue_branch(repo, br)
             p = run(["git", "-C", repo, "branch", "-D", br])
             if not p or p.returncode != 0:
-                return f"worktree removed; branch {br} kept ({p.stderr.strip() if p else 'git error'})"
+                return f"worktree removed; branch {br} kept ({p.stderr.strip() if p else 'git error'})" + rescue
             return f"worktree removed, branch {br} deleted" + rescue
         return "worktree removed" + (f"; branch {br} kept (has unmerged work)" if br else "") + rescue
     if k == "branch":
         rescue = rescue_branch(repo, br)
         p = run(["git", "-C", repo, "branch", "-D", br])
         if not p or p.returncode != 0:
-            raise RuntimeError("git refused: " + (p.stderr.strip() if p else "git not found"))
+            raise RuntimeError("git refused: " + (p.stderr.strip() if p else "git not found") + rescue)
         return f"branch {br} deleted (was {i['head'][:10]})" + rescue
     if k == "remote-branch":  # the lease refuses if origin moved since the scan
         p = run(["git", "-C", repo, "push", f"--force-with-lease=refs/heads/{br}:{i['fingerprint']}",
