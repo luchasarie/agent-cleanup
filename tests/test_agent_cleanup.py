@@ -80,8 +80,8 @@ class Fixture(unittest.TestCase):
     def age(self, path):
         """Make a checkout look untouched for 60 days."""
         idx = self.git("rev-parse", "--path-format=absolute", "--git-path", "index", cwd=path).strip()
-        for p in [Path(idx), *Path(path).iterdir(), Path(path)]:
-            os.utime(p, (OLD, OLD))
+        for p in [Path(idx), *Path(path).rglob("*"), Path(path)]:
+            os.utime(p, (OLD, OLD), follow_symlinks=False)
 
 
 class ScanTests(Fixture):
@@ -91,9 +91,37 @@ class ScanTests(Fixture):
         self.git("merge", "--squash", "feat")
         self.git("commit", "-q", "-m", "squash feat")
         self.git("push", "-q", "origin", "main")
+        self.age(wt)
         it = self.find(self.scan(), "worktree", "app-feat")
         self.assertEqual(it["class"], "REMOVE")
         self.assertIn("content already on origin/main", it["note"])
+        self.assertIn("1 local-only commit(s) saved", it["note"])
+
+    def test_merged_worktree_edited_recently_is_kept(self):
+        wt = self.worktree("app-feat", "feat")
+        self.commit(wt, "feat.txt", "feature\n")
+        self.git("merge", "-q", "--no-ff", "feat", "-m", "merge feat")
+        self.git("push", "-q", "origin", "main")
+        it = self.find(self.scan(), "worktree", "app-feat")
+        self.assertEqual(it["class"], "KEEP-ACTIVE")
+        self.assertIn("files touched 0h ago", it["note"])
+        self.assertEqual(self.find(self.scan("--recent-hours", "0"), "worktree", "app-feat")["class"], "REMOVE")
+
+    def test_husky_hook_shims_are_disposable(self):
+        (self.repo / ".gitignore").write_text(".husky/_/\n")
+        (self.repo / ".husky").mkdir()
+        (self.repo / ".husky" / "pre-commit").write_text("npm test\n")
+        self.git("add", ".gitignore", ".husky/pre-commit")
+        self.git("commit", "-q", "-m", "husky")
+        self.git("push", "-q", "origin", "main")
+        wt = self.worktree("app-feat", "feat")
+        self.commit(wt, "feat.txt", "feature\n")
+        self.git("merge", "-q", "--no-ff", "feat", "-m", "merge feat")
+        self.git("push", "-q", "origin", "main")
+        (wt / ".husky" / "_").mkdir()
+        (wt / ".husky" / "_" / "pre-commit").write_text("#!/bin/sh\n")
+        self.age(wt)
+        self.assertEqual(self.find(self.scan(), "worktree", "app-feat")["class"], "REMOVE")
 
     def test_dirty_worktree_needs_decision(self):
         wt = self.worktree("app-dirty", "dirty")
@@ -162,6 +190,7 @@ class ScanTests(Fixture):
         self.git("merge", "-q", "--no-ff", "env", "-m", "merge env")
         self.git("push", "-q", "origin", "main")
         (wt / "node_modules").mkdir()
+        self.age(wt)
         it = self.find(self.scan(), "worktree", "app-env")
         self.assertEqual(it["class"], "REMOVE")  # node_modules alone is disposable
         (wt / ".env").write_text("SECRET=1\n")
@@ -199,6 +228,7 @@ class ApplyTests(Fixture):
         self.commit(wt, "feat.txt", "feature\n")
         self.git("merge", "-q", "--no-ff", "feat", "-m", "merge feat")
         self.git("push", "-q", "origin", "main")
+        self.age(wt)
         return wt
 
     def test_recommended_removes_merged_and_leaves_the_rest(self):
@@ -273,6 +303,21 @@ class ApplyTests(Fixture):
         out = self.cli("apply", str(item["id"])).stdout
         self.assertIn("detached HEAD saved as refs/agent-cleanup/", out)
         self.assertIn(head, self.git("for-each-ref", "refs/agent-cleanup/"))
+
+    def test_squash_merged_branch_with_local_only_commits_is_rescued(self):
+        self.git("checkout", "-q", "-b", "local")
+        self.commit(self.repo, "l.txt", "local only\n", old=True)
+        tip = self.git("rev-parse", "HEAD").strip()
+        self.git("checkout", "-q", "main")
+        self.git("merge", "--squash", "local")
+        self.git("commit", "-q", "-m", "squash local")
+        self.git("push", "-q", "origin", "main")
+        item = self.find(self.scan(), "branch", "local")
+        self.assertEqual(item["class"], "REMOVE")
+        out = self.cli("apply", str(item["id"])).stdout
+        self.assertIn("local-only commits saved as refs/agent-cleanup/branches/local-", out)
+        self.assertEqual(self.git("branch", "--list", "local").strip(), "")
+        self.assertIn(tip, self.git("for-each-ref", "refs/agent-cleanup/"))
 
     def test_remote_branch_needs_flag_and_lease(self):
         wt = self.merged_worktree()

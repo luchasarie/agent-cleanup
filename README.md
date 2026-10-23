@@ -95,6 +95,7 @@ python3 $S apply --remote 14             # remote branches need --remote here to
 | `--only` | all | Any of `git,artifacts,archives,caches,agents,trash` |
 | `--stale-days` | 14 | Untouched this long counts as stale |
 | `--keep-days` | 30 | Agent logs newer than this are kept |
+| `--recent-hours` | 24 | Merged worktrees with any file edited this recently are KEEP-ACTIVE, since an agent may still be working in them |
 | `--min-size` | 20M | Hide storage items smaller than this |
 | `--fetch` | off | `git fetch --prune` each repo first, so merge checks see the latest base branch |
 | `--remote` | off | Also offer deleting merged branches on `origin` |

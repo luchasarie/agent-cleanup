@@ -33,7 +33,7 @@ The scan is read-only, apart from `--fetch` updating remote-tracking refs. It pr
 
 - `REMOVE`: merged into the base branch, regenerable, or a worktree whose directory is already gone (unregistering it keeps its branch).
 - `NEEDS-DECISION`: holds something unique (uncommitted or ignored files, unmerged or unpushed commits, build output, archives, old logs).
-- `KEEP-ACTIVE` and `SKIP`: open PRs, recent work, long-lived branches, the main checkout, locked or rebasing worktrees, anything a running process is inside, unmounted drives. Never act on these.
+- `KEEP-ACTIVE` and `SKIP`: open PRs, recent work (including merged worktrees with files edited in the last `--recent-hours`), long-lived branches, the main checkout, locked or rebasing worktrees, anything a running process is inside, unmounted drives. Never act on these.
 
 `--help` lists the thresholds (`--stale-days`, `--keep-days`, `--min-size`).
 
@@ -63,7 +63,7 @@ Add `--remote` only when the picked ids include remote branches the user approve
 
 `apply` prints one line per item: done, skipped (changed since the scan, gone, or now in use), refused, or failed with git's reason. Report each one as printed. Leave skipped and refused items in place; the next scan classifies them again. If the plan is more than 24 hours old, `apply` refuses it: scan again and confirm again.
 
-`git worktree remove` refuses a worktree with uncommitted changes. Add `--force` only for ids where the user explicitly accepted losing those changes. A detached worktree's unique commits are saved under `refs/agent-cleanup/` before removal.
+`git worktree remove` refuses a worktree with uncommitted changes. Add `--force` only for ids where the user explicitly accepted losing those changes. A detached worktree's unique commits, and any deleted branch's commits that no remote has, are saved under `refs/agent-cleanup/` before removal.
 
 Done when every picked id has a result line.
 

@@ -101,6 +101,7 @@ UNAMBIGUOUS = {
 DISPOSABLE_NAMES = ARTIFACT_DIRS | {"__pycache__", ".DS_Store", "Thumbs.db", ".eslintcache", ".cache",
                                     "next-env.d.ts", ".astro", ".vite"}
 DISPOSABLE_SUFFIXES = (".pyc", ".pyo", ".tsbuildinfo", ".log", ".egg-info")
+DISPOSABLE_PATHS = (".husky/_",)  # husky regenerates its hook shims on install
 ARCHIVE_RE = re.compile(
     r"\.(zip|tar|tgz|tbz2?|txz|tar\.(gz|bz2|xz|zst)|7z|rar|dump|sql|sql\.gz|bak|orig|old)$", re.I)
 BACKUP_DIR_RE = re.compile(r"(^|[-_.])(bak|backup|backups|old|orig)([-_.]|$)", re.I)
@@ -357,8 +358,10 @@ def rebasing_branch(path):
 
 
 def disposable(rel: str) -> bool:
-    parts = rel.rstrip("/").split("/")
-    return any(p in DISPOSABLE_NAMES for p in parts) or rel.rstrip("/").endswith(DISPOSABLE_SUFFIXES)
+    rel = rel.rstrip("/")
+    parts = rel.split("/")
+    return (any(p in DISPOSABLE_NAMES for p in parts) or rel.endswith(DISPOSABLE_SUFFIXES)
+            or any(rel == d or rel.endswith("/" + d) for d in DISPOSABLE_PATHS))
 
 
 class RepoScan:
@@ -447,6 +450,8 @@ class RepoScan:
                 cls, note = self.no_own_commits(br, head, age)
             elif merged:
                 cls, note = "REMOVE", f"content already on {self.base_ref}"
+                if unpushed not in ("0", "?"):
+                    note += f"; {unpushed} local-only commit(s) saved under refs/agent-cleanup/ on delete"
             elif state == "MERGED":
                 cls, note = "NEEDS-DECISION", f"commits after PR #{num} merged, {unpushed} unpushed"
             elif age <= stale:
@@ -455,6 +460,10 @@ class RepoScan:
                 cls, note = "NEEDS-DECISION", f"PR #{num} closed unmerged, {unpushed} unpushed"
             else:
                 cls, note = "NEEDS-DECISION", f"stale {age}d, no PR, {unpushed} unpushed commit(s)"
+        if cls == "REMOVE" and path:  # merged, but an agent or a person may still be working in it
+            newest = tree_stamp(Path(path), skip=DISPOSABLE_NAMES)[0]
+            if NOW - newest < self.opts.recent_hours * 3600:
+                cls, note = "KEEP-ACTIVE", f"{note}, but files touched {(NOW - newest) / 3600:.0f}h ago"
         return item(kind, cls, path, note, repo=str(self.repo), branch=br or "", head=head,
                     fingerprint=f"{head}:{dirty}:{len(kept)}", last_commit=day(last) if last else "")
 
@@ -973,6 +982,17 @@ def recheck(planned, opts):
     return fresh
 
 
+def rescue_branch(repo, br):
+    """Save a branch tip that no remote has under refs/agent-cleanup/ before deleting it."""
+    if (git(repo, "rev-list", "--count", br, "--not", "--remotes") or "0") == "0":
+        return ""
+    sha = git(repo, "rev-parse", br)
+    ref = f"refs/agent-cleanup/branches/{br}-{sha[:10]}"
+    if not git_ok(repo, "update-ref", ref, sha):
+        raise RuntimeError(f"could not save {br} as {ref}; branch kept")
+    return f"; local-only commits saved as {ref}"
+
+
 def execute(i, opts):
     """Perform one item's action. Returns a short result string."""
     k, path, repo, br = i["kind"], i["path"], i.get("repo", ""), i.get("branch", "")
@@ -997,16 +1017,18 @@ def execute(i, opts):
             kept = f"; branch {i['registered_branch']} kept" if i.get("registered_branch") else ""
             return "unregistered" + kept + rescue
         if br and i["class"] == "REMOVE":
+            rescue += rescue_branch(repo, br)
             p = run(["git", "-C", repo, "branch", "-D", br])
             if not p or p.returncode != 0:
                 return f"worktree removed; branch {br} kept ({p.stderr.strip() if p else 'git error'})"
-            return f"worktree removed, branch {br} deleted"
+            return f"worktree removed, branch {br} deleted" + rescue
         return "worktree removed" + (f"; branch {br} kept (has unmerged work)" if br else "") + rescue
     if k == "branch":
+        rescue = rescue_branch(repo, br)
         p = run(["git", "-C", repo, "branch", "-D", br])
         if not p or p.returncode != 0:
             raise RuntimeError("git refused: " + (p.stderr.strip() if p else "git not found"))
-        return f"branch {br} deleted (was {i['head'][:10]})"
+        return f"branch {br} deleted (was {i['head'][:10]})" + rescue
     if k == "remote-branch":  # the lease refuses if origin moved since the scan
         p = run(["git", "-C", repo, "push", f"--force-with-lease=refs/heads/{br}:{i['fingerprint']}",
                  "origin", f":refs/heads/{br}"], timeout=120)
@@ -1153,6 +1175,8 @@ def main(argv=None):
     s.add_argument("--base", help="base branch for every repo (default: origin/HEAD per repo)")
     s.add_argument("--stale-days", type=int, default=14, help="untouched this long counts as stale (14)")
     s.add_argument("--keep-days", type=int, default=30, help="agent logs newer than this are kept (30)")
+    s.add_argument("--recent-hours", type=int, default=24,
+                   help="merged worktrees with files edited this recently are kept (24)")
     s.add_argument("--min-size", type=parse_size, default=parse_size("20M"),
                    help="hide storage items smaller than this (20M)")
     s.add_argument("--depth", type=int, default=3, help="how deep to look under each --root (3)")
