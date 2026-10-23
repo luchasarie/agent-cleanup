@@ -109,7 +109,10 @@ BACKUP_DIR_RE = re.compile(r"(^|[-_.])(bak|backup|backups|old|orig)([-_.]|$)", r
 WALK_SKIP = ARTIFACT_DIRS | {".git", "Library", "Applications", "snap", ".Trash"}
 REMOVABLE_MEDIA = ("/media/", "/run/media/", "/mnt/", "/Volumes/")
 # Most entries a tree walk counts before giving up (AGENT_CLEANUP_TREE_LIMIT overrides).
-TREE_LIMIT = int(os.environ.get("AGENT_CLEANUP_TREE_LIMIT") or 200_000)
+try:
+    TREE_LIMIT = max(1, int(os.environ.get("AGENT_CLEANUP_TREE_LIMIT") or 200_000))
+except ValueError:
+    TREE_LIMIT = 200_000
 
 # (name, command that prints the cache dir, fallback dir, prune command, note)
 CACHES = [
@@ -467,8 +470,9 @@ class RepoScan:
                 cls, note = "KEEP-ACTIVE", f"{note}, but files touched {(NOW - newest) / 3600:.0f}h ago"
             elif not complete:
                 cls, note = "NEEDS-DECISION", f"{note}, but too many files to confirm nothing changed recently"
-        if cls == "REMOVE" and br and unpushed not in ("0", "?"):
-            note += f"; {unpushed} local-only commit(s) saved under refs/agent-cleanup/ on delete"
+        if cls == "REMOVE" and br and unpushed != "0":
+            n = "local-only commits (count unknown)" if unpushed == "?" else f"{unpushed} local-only commit(s)"
+            note += f"; {n} saved under refs/agent-cleanup/ on delete"
         return item(kind, cls, path, note, repo=str(self.repo), branch=br or "", head=head,
                     fingerprint=f"{head}:{dirty}:{len(kept)}", last_commit=day(last) if last else "")
 
@@ -1024,7 +1028,7 @@ def execute(i, opts):
             args.append("--force")
         p = run(args + [path])
         if not p or p.returncode != 0:
-            raise RuntimeError("git refused: " + (p.stderr.strip() if p else "git not found"))
+            raise RuntimeError("git refused: " + (p.stderr.strip() if p else "git not found") + rescue)
         if i.get("fingerprint", "").startswith("missing:"):
             kept = f"; branch {i['registered_branch']} kept" if i.get("registered_branch") else ""
             return "unregistered" + kept + rescue
