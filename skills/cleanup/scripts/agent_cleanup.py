@@ -226,6 +226,27 @@ def tree_stamp(path: Path, skip=frozenset(), limit=TREE_LIMIT):
     return newest, count, True
 
 
+def work_stamp(path: Path, limit=TREE_LIMIT):
+    """(newest file mtime, complete) over a checkout, ignoring disposable output and folder mtimes,
+    so an install, build or husky refresh doesn't count as someone working in it."""
+    newest, count = 0.0, 0
+    for root, dirs, files in os.walk(path):
+        rel = os.path.relpath(root, path)
+        rel = "" if rel == "." else rel + "/"
+        dirs[:] = [d for d in dirs if d != ".git" and not disposable(rel + d)]
+        for n in files:
+            if (not rel and n == ".git") or disposable(rel + n):
+                continue
+            try:
+                newest = max(newest, os.lstat(os.path.join(root, n)).st_mtime)
+            except OSError:
+                pass
+            count += 1
+            if count > limit:
+                return newest, False
+    return newest, True
+
+
 def process_cwds():
     """Working directories of every process we can see, or None if they can't be listed."""
     cwds = set()
@@ -465,7 +486,7 @@ class RepoScan:
             else:
                 cls, note = "NEEDS-DECISION", f"stale {age}d, no PR, {unpushed} unpushed commit(s)"
         if cls == "REMOVE" and path:  # merged, but an agent or a person may still be working in it
-            newest, _, complete = tree_stamp(Path(path), skip=DISPOSABLE_NAMES)
+            newest, complete = work_stamp(Path(path))
             if NOW - newest < getattr(self.opts, "recent_hours", 24) * 3600:  # older plans lack it
                 cls, note = "KEEP-ACTIVE", f"{note}, but files touched {(NOW - newest) / 3600:.0f}h ago"
             elif not complete:

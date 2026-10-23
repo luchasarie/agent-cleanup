@@ -113,6 +113,31 @@ class ScanTests(Fixture):
         self.assertIn("files touched 0h ago", it["note"])
         self.assertEqual(self.find(self.scan("--recent-hours", "0"), "worktree", "app-feat")["class"], "REMOVE")
 
+    def test_fresh_disposable_output_does_not_count_as_recent_work(self):
+        (self.repo / ".gitignore").write_text("node_modules/\n*.log\nnext-env.d.ts\n.husky/_/\n")
+        (self.repo / ".husky").mkdir()
+        (self.repo / ".husky" / "pre-commit").write_text("npm test\n")
+        self.git("add", ".gitignore", ".husky/pre-commit")
+        self.git("commit", "-q", "-m", "ignores")
+        self.git("push", "-q", "origin", "main")
+        wt = self.worktree("app-feat", "feat")
+        self.commit(wt, "feat.txt", "feature\n")
+        self.git("merge", "-q", "--no-ff", "feat", "-m", "merge feat")
+        self.git("push", "-q", "origin", "main")
+        self.age(wt)
+        (wt / "node_modules" / "pkg").mkdir(parents=True)   # bumps the worktree folder's mtime too
+        (wt / "node_modules" / "pkg" / "index.js").write_text("x")
+        (wt / "build.log").write_text("x")
+        (wt / "next-env.d.ts").write_text("x")
+        (wt / ".husky" / "_").mkdir()
+        (wt / ".husky" / "_" / "h").write_text("x")
+        self.assertEqual(self.find(self.scan(), "worktree", "app-feat")["class"], "REMOVE")
+        (wt / "feat.txt").write_text("edited again\n")
+        self.git("commit", "-q", "-am", "more", cwd=wt)
+        self.git("merge", "-q", "--no-ff", "feat", "-m", "merge feat again")
+        self.git("push", "-q", "origin", "main")
+        self.assertEqual(self.find(self.scan(), "worktree", "app-feat")["class"], "KEEP-ACTIVE")
+
     def test_husky_hook_shims_are_disposable(self):
         (self.repo / ".gitignore").write_text(".husky/_/\n")
         (self.repo / ".husky").mkdir()
