@@ -101,12 +101,18 @@ UNAMBIGUOUS = {
 DISPOSABLE_NAMES = ARTIFACT_DIRS | {"__pycache__", ".DS_Store", "Thumbs.db", ".eslintcache", ".cache",
                                     "next-env.d.ts", ".astro", ".vite"}
 DISPOSABLE_SUFFIXES = (".pyc", ".pyo", ".tsbuildinfo", ".log", ".egg-info")
+DISPOSABLE_PATHS = (".husky/_",)  # husky regenerates its hook shims on install
 ARCHIVE_RE = re.compile(
     r"\.(zip|tar|tgz|tbz2?|txz|tar\.(gz|bz2|xz|zst)|7z|rar|dump|sql|sql\.gz|bak|orig|old)$", re.I)
 BACKUP_DIR_RE = re.compile(r"(^|[-_.])(bak|backup|backups|old|orig)([-_.]|$)", re.I)
 # Never walked into while looking for repos, archives and backups.
 WALK_SKIP = ARTIFACT_DIRS | {".git", "Library", "Applications", "snap", ".Trash"}
 REMOVABLE_MEDIA = ("/media/", "/run/media/", "/mnt/", "/Volumes/")
+# Most entries a tree walk counts before giving up (AGENT_CLEANUP_TREE_LIMIT overrides).
+try:
+    TREE_LIMIT = max(1, int(os.environ.get("AGENT_CLEANUP_TREE_LIMIT") or 200_000))
+except ValueError:
+    TREE_LIMIT = 200_000
 
 # (name, command that prints the cache dir, fallback dir, prune command, note)
 CACHES = [
@@ -198,7 +204,7 @@ def day(ts: float) -> str:
     return dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
 
 
-def tree_stamp(path: Path, skip=frozenset(), limit=200_000):
+def tree_stamp(path: Path, skip=frozenset(), limit=TREE_LIMIT):
     """(newest mtime, entry count, complete) over a whole tree, not entering .git or `skip` names."""
     try:
         newest = path.lstat().st_mtime
@@ -218,6 +224,27 @@ def tree_stamp(path: Path, skip=frozenset(), limit=200_000):
             if count > limit:
                 return newest, count, False
     return newest, count, True
+
+
+def work_stamp(path: Path, limit=TREE_LIMIT):
+    """(newest file mtime, complete) over a checkout, ignoring disposable output and folder mtimes,
+    so an install, build or husky refresh doesn't count as someone working in it."""
+    newest, count = 0.0, 0
+    for root, dirs, files in os.walk(path):
+        rel = os.path.relpath(root, path)
+        rel = "" if rel == "." else rel + "/"
+        dirs[:] = [d for d in dirs if d != ".git" and not disposable(rel + d)]
+        for n in files:
+            if (not rel and n == ".git") or disposable(rel + n):
+                continue
+            try:
+                newest = max(newest, os.lstat(os.path.join(root, n)).st_mtime)
+            except OSError:
+                pass
+            count += 1
+            if count > limit:
+                return newest, False
+    return newest, True
 
 
 def process_cwds():
@@ -357,8 +384,11 @@ def rebasing_branch(path):
 
 
 def disposable(rel: str) -> bool:
-    parts = rel.rstrip("/").split("/")
-    return any(p in DISPOSABLE_NAMES for p in parts) or rel.rstrip("/").endswith(DISPOSABLE_SUFFIXES)
+    rel = rel.rstrip("/")
+    parts = rel.split("/")
+    return (any(p in DISPOSABLE_NAMES for p in parts) or rel.endswith(DISPOSABLE_SUFFIXES)
+            or any(rel == d or rel.endswith("/" + d) or rel.startswith(d + "/") or f"/{d}/" in rel
+                   for d in DISPOSABLE_PATHS))
 
 
 class RepoScan:
@@ -455,6 +485,15 @@ class RepoScan:
                 cls, note = "NEEDS-DECISION", f"PR #{num} closed unmerged, {unpushed} unpushed"
             else:
                 cls, note = "NEEDS-DECISION", f"stale {age}d, no PR, {unpushed} unpushed commit(s)"
+        if cls == "REMOVE" and path:  # merged, but an agent or a person may still be working in it
+            newest, complete = work_stamp(Path(path))
+            if NOW - newest < getattr(self.opts, "recent_hours", 24) * 3600:  # older plans lack it
+                cls, note = "KEEP-ACTIVE", f"{note}, but files touched {(NOW - newest) / 3600:.0f}h ago"
+            elif not complete:
+                cls, note = "NEEDS-DECISION", f"{note}, but too many files to confirm nothing changed recently"
+        if cls == "REMOVE" and br and unpushed != "0":
+            n = "local-only commits (count unknown)" if unpushed == "?" else f"{unpushed} local-only commit(s)"
+            note += f"; {n} saved under refs/agent-cleanup/ on delete"
         return item(kind, cls, path, note, repo=str(self.repo), branch=br or "", head=head,
                     fingerprint=f"{head}:{dirty}:{len(kept)}", last_commit=day(last) if last else "")
 
@@ -973,6 +1012,22 @@ def recheck(planned, opts):
     return fresh
 
 
+def rescue_branch(repo, br):
+    """Save a branch tip that no remote has under refs/agent-cleanup/ before deleting it.
+
+    An unknown count counts as unpushed; raises when the tip can't be saved.
+    """
+    if git(repo, "rev-list", "--count", f"refs/heads/{br}", "--not", "--remotes") == "0":
+        return ""
+    sha = git(repo, "rev-parse", "-q", "--verify", f"refs/heads/{br}")
+    if not sha:
+        raise RuntimeError(f"could not resolve branch {br} to save it; nothing deleted")
+    ref = f"refs/agent-cleanup/branches/{br}-{sha[:10]}"
+    if not git_ok(repo, "update-ref", ref, sha):
+        raise RuntimeError(f"could not save {br} as {ref}; nothing deleted")
+    return f"; local-only commits saved as {ref}"
+
+
 def execute(i, opts):
     """Perform one item's action. Returns a short result string."""
     k, path, repo, br = i["kind"], i["path"], i.get("repo", ""), i.get("branch", "")
@@ -987,26 +1042,29 @@ def execute(i, opts):
             if not git_ok(repo, "update-ref", ref, head):
                 raise RuntimeError(f"could not save detached HEAD as {ref}; nothing removed")
             rescue = f"; detached HEAD saved as {ref}"
+        if br and i["class"] == "REMOVE":  # its branch goes too: save it while nothing is removed yet
+            rescue += rescue_branch(repo, br)
         args = ["git", "-C", repo, "worktree", "remove"]
         if opts.force and i["class"] == "NEEDS-DECISION":
             args.append("--force")
         p = run(args + [path])
         if not p or p.returncode != 0:
-            raise RuntimeError("git refused: " + (p.stderr.strip() if p else "git not found"))
+            raise RuntimeError("git refused: " + (p.stderr.strip() if p else "git not found") + rescue)
         if i.get("fingerprint", "").startswith("missing:"):
             kept = f"; branch {i['registered_branch']} kept" if i.get("registered_branch") else ""
             return "unregistered" + kept + rescue
         if br and i["class"] == "REMOVE":
             p = run(["git", "-C", repo, "branch", "-D", br])
             if not p or p.returncode != 0:
-                return f"worktree removed; branch {br} kept ({p.stderr.strip() if p else 'git error'})"
-            return f"worktree removed, branch {br} deleted"
+                return f"worktree removed; branch {br} kept ({p.stderr.strip() if p else 'git error'})" + rescue
+            return f"worktree removed, branch {br} deleted" + rescue
         return "worktree removed" + (f"; branch {br} kept (has unmerged work)" if br else "") + rescue
     if k == "branch":
+        rescue = rescue_branch(repo, br)
         p = run(["git", "-C", repo, "branch", "-D", br])
         if not p or p.returncode != 0:
-            raise RuntimeError("git refused: " + (p.stderr.strip() if p else "git not found"))
-        return f"branch {br} deleted (was {i['head'][:10]})"
+            raise RuntimeError("git refused: " + (p.stderr.strip() if p else "git not found") + rescue)
+        return f"branch {br} deleted (was {i['head'][:10]})" + rescue
     if k == "remote-branch":  # the lease refuses if origin moved since the scan
         p = run(["git", "-C", repo, "push", f"--force-with-lease=refs/heads/{br}:{i['fingerprint']}",
                  "origin", f":refs/heads/{br}"], timeout=120)
@@ -1153,6 +1211,8 @@ def main(argv=None):
     s.add_argument("--base", help="base branch for every repo (default: origin/HEAD per repo)")
     s.add_argument("--stale-days", type=int, default=14, help="untouched this long counts as stale (14)")
     s.add_argument("--keep-days", type=int, default=30, help="agent logs newer than this are kept (30)")
+    s.add_argument("--recent-hours", type=int, default=24,
+                   help="merged worktrees with files edited this recently are kept (24)")
     s.add_argument("--min-size", type=parse_size, default=parse_size("20M"),
                    help="hide storage items smaller than this (20M)")
     s.add_argument("--depth", type=int, default=3, help="how deep to look under each --root (3)")

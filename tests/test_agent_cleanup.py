@@ -61,6 +61,12 @@ class Fixture(unittest.TestCase):
             self.fail(f"exit {p.returncode}\n{p.stdout}\n{p.stderr}")
         return p
 
+    def call(self, expr, *args):
+        """Evaluate expr with the script imported as `a` (sys.argv[1:] = args); returns its JSON."""
+        code = ("import json, sys; sys.path.insert(0, sys.argv.pop(1)); import agent_cleanup as a\n"
+                f"print(json.dumps({expr}))")
+        return json.loads(self.sh(sys.executable, "-c", code, str(SCRIPT.parent), *args, cwd=self.tmp))
+
     def scan(self, *extra):
         out = self.cli("scan", "--json", "--min-size", "0", "--only", "git,artifacts,archives",
                        "--root", str(self.dev), *extra).stdout
@@ -80,8 +86,8 @@ class Fixture(unittest.TestCase):
     def age(self, path):
         """Make a checkout look untouched for 60 days."""
         idx = self.git("rev-parse", "--path-format=absolute", "--git-path", "index", cwd=path).strip()
-        for p in [Path(idx), *Path(path).iterdir(), Path(path)]:
-            os.utime(p, (OLD, OLD))
+        for p in [Path(idx), *Path(path).rglob("*"), Path(path)]:
+            os.utime(p, (OLD, OLD), follow_symlinks=False)
 
 
 class ScanTests(Fixture):
@@ -91,9 +97,95 @@ class ScanTests(Fixture):
         self.git("merge", "--squash", "feat")
         self.git("commit", "-q", "-m", "squash feat")
         self.git("push", "-q", "origin", "main")
+        self.age(wt)
         it = self.find(self.scan(), "worktree", "app-feat")
         self.assertEqual(it["class"], "REMOVE")
         self.assertIn("content already on origin/main", it["note"])
+        self.assertIn("1 local-only commit(s) saved", it["note"])
+
+    def test_merged_worktree_edited_recently_is_kept(self):
+        wt = self.worktree("app-feat", "feat")
+        self.commit(wt, "feat.txt", "feature\n")
+        self.git("merge", "-q", "--no-ff", "feat", "-m", "merge feat")
+        self.git("push", "-q", "origin", "main")
+        it = self.find(self.scan(), "worktree", "app-feat")
+        self.assertEqual(it["class"], "KEEP-ACTIVE")
+        self.assertIn("files touched 0h ago", it["note"])
+        self.assertEqual(self.find(self.scan("--recent-hours", "0"), "worktree", "app-feat")["class"], "REMOVE")
+
+    def test_fresh_disposable_output_does_not_count_as_recent_work(self):
+        (self.repo / ".gitignore").write_text("node_modules/\n*.log\nnext-env.d.ts\n.husky/_/\n")
+        (self.repo / ".husky").mkdir()
+        (self.repo / ".husky" / "pre-commit").write_text("npm test\n")
+        self.git("add", ".gitignore", ".husky/pre-commit")
+        self.git("commit", "-q", "-m", "ignores")
+        self.git("push", "-q", "origin", "main")
+        wt = self.worktree("app-feat", "feat")
+        self.commit(wt, "feat.txt", "feature\n")
+        self.git("merge", "-q", "--no-ff", "feat", "-m", "merge feat")
+        self.git("push", "-q", "origin", "main")
+        self.age(wt)
+        (wt / "node_modules" / "pkg").mkdir(parents=True)   # bumps the worktree folder's mtime too
+        (wt / "node_modules" / "pkg" / "index.js").write_text("x")
+        (wt / "build.log").write_text("x")
+        (wt / "next-env.d.ts").write_text("x")
+        (wt / ".husky" / "_").mkdir()
+        (wt / ".husky" / "_" / "h").write_text("x")
+        self.assertEqual(self.find(self.scan(), "worktree", "app-feat")["class"], "REMOVE")
+        (wt / "feat.txt").write_text("edited again\n")
+        self.git("commit", "-q", "-am", "more", cwd=wt)
+        self.git("merge", "-q", "--no-ff", "feat", "-m", "merge feat again")
+        self.git("push", "-q", "origin", "main")
+        self.assertEqual(self.find(self.scan(), "worktree", "app-feat")["class"], "KEEP-ACTIVE")
+
+    def test_husky_hook_shims_are_disposable(self):
+        (self.repo / ".gitignore").write_text(".husky/_/\n")
+        (self.repo / ".husky").mkdir()
+        (self.repo / ".husky" / "pre-commit").write_text("npm test\n")
+        self.git("add", ".gitignore", ".husky/pre-commit")
+        self.git("commit", "-q", "-m", "husky")
+        self.git("push", "-q", "origin", "main")
+        wt = self.worktree("app-feat", "feat")
+        self.commit(wt, "feat.txt", "feature\n")
+        self.git("merge", "-q", "--no-ff", "feat", "-m", "merge feat")
+        self.git("push", "-q", "origin", "main")
+        (wt / ".husky" / "_").mkdir()
+        (wt / ".husky" / "_" / "pre-commit").write_text("#!/bin/sh\n")
+        self.age(wt)
+        self.assertEqual(self.find(self.scan(), "worktree", "app-feat")["class"], "REMOVE")
+
+    def test_entries_inside_husky_shims_are_disposable(self):
+        names = [".husky/_", ".husky/_/husky.sh", "web/.husky/_/pre-commit", ".husky/pre-commit", "x.husky/_/h"]
+        self.assertEqual(self.call(f"[a.disposable(n) for n in {names!r}]"), [True, True, True, False, False])
+
+    def test_merged_worktree_too_big_to_walk_needs_decision(self):
+        wt = self.worktree("app-feat", "feat")
+        self.commit(wt, "feat.txt", "feature\n")
+        self.git("merge", "-q", "--no-ff", "feat", "-m", "merge feat")
+        self.git("push", "-q", "origin", "main")
+        self.age(wt)
+        self.env["AGENT_CLEANUP_TREE_LIMIT"] = "1"
+        it = self.find(self.scan(), "worktree", "app-feat")
+        self.assertEqual(it["class"], "NEEDS-DECISION")
+        self.assertIn("merged into origin/main, but too many files to confirm", it["note"])
+
+    def test_pr_merged_branch_notes_local_only_commits(self):
+        self.git("branch", "pr-branch")
+        self.git("switch", "-q", "pr-branch")
+        self.commit(self.repo, "p.txt", "only local\n", old=True)
+        tip = self.git("rev-parse", "HEAD").strip()
+        self.git("switch", "-q", "main")
+        fake = self.tmp / "bin"
+        fake.mkdir()
+        pr = [{"headRefName": "pr-branch", "state": "MERGED", "number": 7, "headRefOid": tip,
+               "baseRefName": "main"}]
+        (fake / "gh").write_text(f"#!/bin/sh\necho '{json.dumps(pr)}'\n")
+        (fake / "gh").chmod(0o755)
+        self.env.pop("AGENT_CLEANUP_NO_GH")
+        self.env["PATH"] = f"{fake}{os.pathsep}{self.env['PATH']}"
+        it = self.find(self.scan(), "branch", "pr-branch")
+        self.assertEqual(it["class"], "REMOVE")
+        self.assertEqual(it["note"], "PR #7 merged; 1 local-only commit(s) saved under refs/agent-cleanup/ on delete")
 
     def test_dirty_worktree_needs_decision(self):
         wt = self.worktree("app-dirty", "dirty")
@@ -162,6 +254,7 @@ class ScanTests(Fixture):
         self.git("merge", "-q", "--no-ff", "env", "-m", "merge env")
         self.git("push", "-q", "origin", "main")
         (wt / "node_modules").mkdir()
+        self.age(wt)
         it = self.find(self.scan(), "worktree", "app-env")
         self.assertEqual(it["class"], "REMOVE")  # node_modules alone is disposable
         (wt / ".env").write_text("SECRET=1\n")
@@ -199,6 +292,7 @@ class ApplyTests(Fixture):
         self.commit(wt, "feat.txt", "feature\n")
         self.git("merge", "-q", "--no-ff", "feat", "-m", "merge feat")
         self.git("push", "-q", "origin", "main")
+        self.age(wt)
         return wt
 
     def test_recommended_removes_merged_and_leaves_the_rest(self):
@@ -273,6 +367,80 @@ class ApplyTests(Fixture):
         out = self.cli("apply", str(item["id"])).stdout
         self.assertIn("detached HEAD saved as refs/agent-cleanup/", out)
         self.assertIn(head, self.git("for-each-ref", "refs/agent-cleanup/"))
+
+    def test_squash_merged_branch_with_local_only_commits_is_rescued(self):
+        self.git("checkout", "-q", "-b", "local")
+        self.commit(self.repo, "l.txt", "local only\n", old=True)
+        tip = self.git("rev-parse", "HEAD").strip()
+        self.git("checkout", "-q", "main")
+        self.git("merge", "--squash", "local")
+        self.git("commit", "-q", "-m", "squash local")
+        self.git("push", "-q", "origin", "main")
+        item = self.find(self.scan(), "branch", "local")
+        self.assertEqual(item["class"], "REMOVE")
+        out = self.cli("apply", str(item["id"])).stdout
+        self.assertIn("local-only commits saved as refs/agent-cleanup/branches/local-", out)
+        self.assertEqual(self.git("branch", "--list", "local").strip(), "")
+        self.assertIn(tip, self.git("for-each-ref", "refs/agent-cleanup/"))
+
+    def squash_merged_worktree(self):
+        wt = self.worktree("app-feat", "feat")
+        self.commit(wt, "feat.txt", "feature\n", old=True)
+        self.git("merge", "--squash", "feat")
+        self.git("commit", "-q", "-m", "squash feat")
+        self.git("push", "-q", "origin", "main")
+        self.age(wt)
+        item = self.find(self.scan(), "worktree", "app-feat")
+        self.assertEqual(item["class"], "REMOVE")
+        return wt, item
+
+    def test_failed_branch_rescue_removes_nothing(self):
+        wt, item = self.squash_merged_worktree()
+        self.git("update-ref", "refs/agent-cleanup/branches", "HEAD")  # blocks refs under it
+        out = self.cli("apply", str(item["id"])).stdout
+        self.assertIn("failed: could not save feat as refs/agent-cleanup/branches/feat-", out)
+        self.assertIn("nothing deleted", out)
+        self.assertTrue(wt.exists())
+        self.assertIn("feat", self.git("branch", "--list", "feat"))
+
+    def test_unresolvable_branch_is_never_treated_as_pushed(self):
+        with self.assertRaises(subprocess.CalledProcessError) as e:
+            self.call("a.rescue_branch(sys.argv[1], 'no-such-branch')", str(self.repo))
+        self.assertIn("could not resolve branch no-such-branch", e.exception.stderr)
+
+    def test_failed_branch_delete_still_reports_rescue_ref(self):
+        wt, item = self.squash_merged_worktree()
+        lock = Path(self.git("rev-parse", "--git-path", "refs/heads/feat.lock").strip())
+        lock = lock if lock.is_absolute() else self.repo / lock
+        lock.write_text("")  # makes `git branch -D feat` fail
+        out = self.cli("apply", str(item["id"])).stdout
+        self.assertIn("worktree removed; branch feat kept", out)
+        self.assertIn("local-only commits saved as refs/agent-cleanup/branches/feat-", out)
+        self.assertFalse(wt.exists())
+
+        self.git("worktree", "add", "-q", "-b", "local", str(self.dev / "tmp-wt"))
+        self.commit(self.dev / "tmp-wt", "l.txt", "local only\n", old=True)
+        self.git("worktree", "remove", str(self.dev / "tmp-wt"))
+        self.git("merge", "--squash", "local")
+        self.git("commit", "-q", "-m", "squash local")
+        self.git("push", "-q", "origin", "main")
+        branch = self.find(self.scan(), "branch", "local")
+        self.assertEqual(branch["class"], "REMOVE")
+        (lock.parent / "local.lock").write_text("")
+        out = self.cli("apply", str(branch["id"])).stdout
+        self.assertIn("failed: git refused", out)
+        self.assertIn("local-only commits saved as refs/agent-cleanup/branches/local-", out)
+
+    def test_plan_without_recent_hours_still_applies(self):
+        wt = self.merged_worktree()
+        self.scan()
+        plan_file = self.tmp / "state" / "agent-cleanup" / "plan.json"
+        plan = json.loads(plan_file.read_text())
+        del plan["options"]["recent_hours"]
+        plan_file.write_text(json.dumps(plan))
+        out = self.cli("apply", "--recommended").stdout
+        self.assertIn("worktree removed, branch feat deleted", out)
+        self.assertFalse(wt.exists())
 
     def test_remote_branch_needs_flag_and_lease(self):
         wt = self.merged_worktree()
